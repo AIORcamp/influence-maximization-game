@@ -212,7 +212,8 @@
 <script>
 // --- 參數 ---
 const NODE_COUNT = 16; 
-const NODE_RADIUS = 24; // 可稍微縮小以適應手機，但保持 24 比較好按
+// 稍微加大半徑，讓手指更好點
+const NODE_RADIUS = 28; 
 const MAX_SEEDS = 3;
 
 // --- 變數 ---
@@ -227,6 +228,8 @@ let mySeed = 2026;
 let dragNode = null;
 let dragStartPos = {x:0, y:0};
 let isDraggingNode = false; 
+// 新增：紀錄按下時間，用來輔助判定是點擊還是長按拖曳
+let touchStartTime = 0;
 
 // --- 隨機數 ---
 function seededRandom() {
@@ -238,9 +241,12 @@ window.onload = function() {
     canvas = document.getElementById('gameCanvas');
     ctx = canvas.getContext('2d');
     
-    window.addEventListener('resize', resizeCanvas);
+    // RWD 設定
+    const wrapper = document.getElementById('canvas-wrapper');
+    const resizeObserver = new ResizeObserver(() => resizeCanvas());
+    resizeObserver.observe(wrapper);
     
-    // 註冊事件 - 統一處理 Touch 與 Mouse
+    // 註冊事件 - 綁定更完整的觸控事件
     canvas.addEventListener('mousedown', onPointerDown);
     canvas.addEventListener('touchstart', onPointerDown, {passive: false});
     
@@ -248,34 +254,45 @@ window.onload = function() {
     canvas.addEventListener('touchmove', onPointerMove, {passive: false});
     
     window.addEventListener('mouseup', onPointerUp);
-    window.addEventListener('touchend', onPointerUp);
+    window.addEventListener('touchend', onPointerUp, {passive: false});
 
     initDraggablePanel();
 
+    // 延遲啟動確保尺寸正確
     setTimeout(() => {
         resizeCanvas();
         reloadMap();
         requestAnimationFrame(loop);
-    }, 100);
+    }, 200);
 };
 
 function resizeCanvas() {
     const wrapper = document.getElementById('canvas-wrapper');
-    // 使用 getBoundingClientRect 獲取更精確的像素尺寸
     const rect = wrapper.getBoundingClientRect();
-    width = canvas.width = rect.width;
-    height = canvas.height = rect.height;
+    // 使用 devicePixelRatio 讓手機畫面更清晰，但邏輯座標不變
+    const dpr = window.devicePixelRatio || 1;
     
-    // 重繪時不需重新生成地圖，只需確保邊界檢查
+    // 設定畫布實際像素
+    canvas.width = rect.width * dpr;
+    canvas.height = rect.height * dpr;
+    
+    // 設定 CSS 顯示大小
+    canvas.style.width = rect.width + 'px';
+    canvas.style.height = rect.height + 'px';
+    
+    // 縮放繪圖上下文
+    ctx.scale(dpr, dpr);
+    
+    // 邏輯寬高
+    width = rect.width;
+    height = rect.height;
 }
 
 function toggleTable() {
     const panel = document.getElementById('data-panel');
     panel.classList.toggle('visible');
     
-    // 在手機上打開時，預設最小化以免遮擋，除非它是第一次打開
     if (window.innerWidth < 600 && !panel.dataset.opened) {
-         // panel.classList.add('minimized'); // 選擇性開啟此行
          panel.dataset.opened = "true";
     }
     updateTable();
@@ -301,9 +318,7 @@ function initDraggablePanel() {
     let startX, startY, initialLeft, initialTop;
 
     const startDrag = (e) => {
-        // 如果點到的是按鈕，不要拖曳
         if(e.target.classList.contains('btn-min')) return;
-        
         isPanelDragging = true;
         let clientX = e.clientX || (e.touches ? e.touches[0].clientX : 0);
         let clientY = e.clientY || (e.touches ? e.touches[0].clientY : 0);
@@ -312,7 +327,6 @@ function initDraggablePanel() {
         initialLeft = panel.offsetLeft;
         initialTop = panel.offsetTop;
         
-        // 綁定到 document 以防拖出範圍
         document.addEventListener('mousemove', onDrag);
         document.addEventListener('mouseup', stopDrag);
         document.addEventListener('touchmove', onDrag, {passive: false});
@@ -321,17 +335,18 @@ function initDraggablePanel() {
 
     const onDrag = (e) => {
         if(!isPanelDragging) return;
-        e.preventDefault();
+        // 面板拖曳時阻止預設行為
+        if(e.type === 'touchmove') e.preventDefault();
+        
         let clientX = e.clientX || (e.touches ? e.touches[0].clientX : 0);
         let clientY = e.clientY || (e.touches ? e.touches[0].clientY : 0);
         let dx = clientX - startX;
         let dy = clientY - startY;
         
-        // 限制不要拖出畫面
         let newLeft = initialLeft + dx;
         let newTop = initialTop + dy;
-        let maxLeft = document.getElementById('canvas-wrapper').clientWidth - panel.offsetWidth;
-        let maxTop = document.getElementById('canvas-wrapper').clientHeight - panel.offsetHeight;
+        let maxLeft = width - panel.offsetWidth;
+        let maxTop = height - panel.offsetHeight;
 
         panel.style.left = Math.max(0, Math.min(maxLeft, newLeft)) + 'px';
         panel.style.top = Math.max(0, Math.min(maxTop, newTop)) + 'px';
@@ -356,7 +371,6 @@ function reloadMap() {
     
     nodes = [];
     let attempts = 0;
-    // 讓節點不要太貼邊
     let padding = NODE_RADIUS * 1.5;
     let safeW = width - 2 * padding;
     let safeH = height - 2 * padding;
@@ -368,8 +382,7 @@ function reloadMap() {
         
         let overlap = false;
         for(let n of nodes) {
-            // 保持一定距離
-            if(Math.hypot(n.x - x, n.y - y) < NODE_RADIUS * 2.8) {
+            if(Math.hypot(n.x - x, n.y - y) < NODE_RADIUS * 2.5) {
                 overlap = true; break;
             }
         }
@@ -386,7 +399,6 @@ function reloadMap() {
         }
     }
 
-    // 連線生成邏輯
     let connected = [0]; 
     let unconnected = []; 
     for(let i=1; i<NODE_COUNT; i++) unconnected.push(i);
@@ -398,14 +410,13 @@ function reloadMap() {
         let bestVIdx = -1;
         let minDist = Infinity;
         
-        // 嘗試找最近的點，讓圖比較好看
         for(let k=0; k<5; k++) {
              let tryIdx = Math.floor(seededRandom() * unconnected.length);
              let vCand = unconnected[tryIdx];
              let d = Math.hypot(nodes[u].x - nodes[vCand].x, nodes[u].y - nodes[vCand].y);
              if(d < minDist) { minDist = d; bestVIdx = tryIdx; }
         }
-        if(bestVIdx === -1) bestVIdx = 0; // fallback
+        if(bestVIdx === -1) bestVIdx = 0;
         
         let v = unconnected[bestVIdx];
         rawPairs.push({u: u, v: v});
@@ -413,12 +424,10 @@ function reloadMap() {
         unconnected.splice(bestVIdx, 1);
     }
 
-    // 加一些隨機邊
     for(let i=0; i<NODE_COUNT; i++) {
         let u = i;
         let v = Math.floor(seededRandom() * NODE_COUNT);
         if(u !== v && !rawPairs.some(p => (p.u===u && p.v===v) || (p.u===v && p.v===u))) {
-             // 距離太遠不連
              if(Math.hypot(nodes[u].x - nodes[v].x, nodes[u].y - nodes[v].y) < width * 0.45) {
                  rawPairs.push({u: u, v: v});
              }
@@ -495,18 +504,16 @@ function updateTable() {
     tbody.innerHTML = html;
 }
 
-// --- 互動 (整合 Pointer) ---
+// --- 互動 (關鍵修正區域) ---
 function getPointerPos(e) {
     let rect = canvas.getBoundingClientRect();
     let clientX = e.clientX;
     let clientY = e.clientY;
     
-    // 處理 Touch 事件
     if(e.touches && e.touches.length > 0) {
         clientX = e.touches[0].clientX;
         clientY = e.touches[0].clientY;
     } else if (e.changedTouches && e.changedTouches.length > 0) {
-        // 處理 touchend
         clientX = e.changedTouches[0].clientX;
         clientY = e.changedTouches[0].clientY;
     }
@@ -519,16 +526,22 @@ function getPointerPos(e) {
 
 function onPointerDown(e) {
     if(isSimulating) return;
-    // e.preventDefault() // 這裡先不加，讓外部判斷
     
+    // 如果是觸控，阻止預設行為（防止反白、捲動等）
+    // 但如果是按鈕區域則不阻止
+    if(e.target !== canvas) return;
+    if(e.type === 'touchstart') e.preventDefault();
+
     let pos = getPointerPos(e);
+    
     for(let n of nodes) {
         let d = Math.hypot(pos.x - n.x, pos.y - n.y);
-        // 增加觸控判定範圍
-        if(d < NODE_RADIUS * 1.8) {
+        // 判定範圍放大到 半徑的 2 倍，讓手指更容易點到
+        if(d < NODE_RADIUS * 2) {
             dragNode = n;
             dragStartPos = {x: pos.x, y: pos.y};
             isDraggingNode = false;
+            touchStartTime = Date.now(); // 紀錄時間
             return;
         }
     }
@@ -536,13 +549,19 @@ function onPointerDown(e) {
 
 function onPointerMove(e) {
     if(!dragNode) return;
-    e.preventDefault(); // 拖曳時禁止捲動
+    if(e.type === 'touchmove') e.preventDefault(); // 拖曳時絕對禁止捲動
     
     let pos = getPointerPos(e);
+    
     if(!isDraggingNode) {
         let distMoved = Math.hypot(pos.x - dragStartPos.x, pos.y - dragStartPos.y);
-        if(distMoved > 5) isDraggingNode = true;
+        // [關鍵修正]：將門檻值從 5 提高到 15
+        // 手機上輕微抖動不會被視為拖曳，這樣放開時才能觸發「點擊」
+        if(distMoved > 15) {
+            isDraggingNode = true;
+        }
     }
+    
     if(isDraggingNode) {
         let pad = NODE_RADIUS;
         dragNode.x = Math.max(pad, Math.min(width - pad, pos.x));
@@ -551,15 +570,29 @@ function onPointerMove(e) {
 }
 
 function onPointerUp(e) {
+    // 確保 touchend 也不會觸發其他行為
+    if(e.type === 'touchend' && e.target === canvas) e.preventDefault();
+
     if(dragNode) {
-        if(!isDraggingNode) toggleSeed(dragNode);
-        dragNode = null; isDraggingNode = false;
+        let timeDiff = Date.now() - touchStartTime;
+        
+        // 觸發條件：
+        // 1. 沒有被標記為「正在拖曳」
+        // 2. 或者，雖然有微小移動，但時間很短（小於 200ms），也視為點擊
+        if (!isDraggingNode || timeDiff < 200) {
+            toggleSeed(dragNode);
+        }
+        
+        dragNode = null; 
+        isDraggingNode = false;
     }
 }
 
 function loop() {
+    // 使用 clearRect 代替 fillRect 確保背景乾淨，再填色
+    ctx.clearRect(0,0, canvas.width, canvas.height);
     ctx.fillStyle = '#fff'; 
-    ctx.fillRect(0, 0, width, height);
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
 
     try {
         nodes.forEach(source => {
@@ -587,7 +620,7 @@ function loop() {
             ctx.shadowBlur = 0; ctx.lineWidth = 2; ctx.stroke();
 
             ctx.fillStyle = '#2d3436';
-            ctx.font = 'bold 16px Arial'; // 字體微調
+            ctx.font = 'bold 16px Arial'; 
             ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
             ctx.fillText(n.id, n.x, n.y);
 
@@ -620,7 +653,7 @@ function drawCurve(source, target, isActive, weight, drawLabelOnly) {
 
     let midX = (source.x + target.x) / 2;
     let midY = (source.y + target.y) / 2;
-    let offset = 30; // 弧度稍微減小一點，比較不會太亂
+    let offset = 30; 
     let normX = -dy / dist;
     let normY = dx / dist;
     let ctrlX = midX + normX * offset;
@@ -722,8 +755,6 @@ async function startSim() {
         }
         
         nodes.forEach(n => {
-            // 修正判定：只要能量大於門檻，且尚未激活，就激活並加入下輪擴散
-            // 注意：要避免已經是 seed 的人再次被加入 queue
             if(n.state === 'normal' && n.currentInput > n.threshold) {
                 n.state = 'active';
                 nextQueue.push(n);
@@ -746,3 +777,4 @@ function resetGame() {
 </script>
 </body>
 </html>
+
