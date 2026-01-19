@@ -2,148 +2,189 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Traffic Diffusion Game</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>流量密碼戰</title>
     <style>
-        /* --- 核心版面修正 (Flexbox) --- */
+        /* --- 全局 Layout 設定 (關鍵修正) --- */
+        * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+        
         html, body {
-            margin: 0;
-            padding: 0;
-            width: 100%;
-            height: 100dvh; /* 使用 dvh 確保填滿手機螢幕高度 */
-            overflow: hidden; /* 禁止出現捲軸 */
-            font-family: Arial, sans-serif;
-            background-color: #f0f2f5;
-        }
-
-        body {
+            margin: 0; padding: 0;
+            width: 100%; height: 100dvh; /* 確保佔滿手機視窗 */
+            overflow: hidden; /* 禁止捲動 */
+            font-family: "Microsoft JhengHei", Arial, sans-serif;
+            background-color: #f4f6f9;
             display: flex;
-            flex-direction: column; /* 由上而下排列：標題 -> 畫布 -> 按鈕 */
+            flex-direction: column; /* 由上而下排列 */
         }
 
-        /* 1. 頂部標題列 */
+        /* --- 頂部標題列 --- */
         .header {
-            padding: 8px 10px;
-            background: #fff;
-            border-bottom: 1px solid #ccc;
-            flex-shrink: 0; /* 禁止被壓縮 */
+            background-color: #2c3e50; /* 深藍色背景 */
+            color: white;
+            padding: 8px 12px;
             display: flex;
             justify-content: space-between;
             align-items: center;
-            font-size: 14px;
+            flex-shrink: 0; /* 禁止被壓縮 */
+            z-index: 10;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+        .title { font-size: 1.1rem; font-weight: bold; }
+        .header-controls { display: flex; gap: 5px; }
+        
+        input[type="number"] {
+            width: 60px; padding: 4px; border-radius: 4px; border: none; text-align: center;
         }
 
-        /* 2. 中間畫布區 (關鍵) */
+        /* --- 中間畫布區 (自動伸縮) --- */
         #canvas-wrapper {
-            flex: 1; /* 自動填滿剩餘空間 */
-            min-height: 0; /* 允許縮小到比內容還小 (解決 flex 溢出問題) */
+            flex: 1; /* 自動填滿剩餘高度 */
+            min-height: 0; /* 允許縮小，這是解決 flex 溢出的關鍵 */
             position: relative;
             width: 100%;
             background: #fff;
+            touch-action: none; /* 禁止瀏覽器預設觸控 */
         }
+        canvas { display: block; width: 100%; height: 100%; }
 
-        canvas {
-            display: block;
-            width: 100%;
-            height: 100%;
-        }
-
-        /* 3. 底部控制列 */
-        .controls {
-            padding: 8px;
+        /* --- 底部區域 (包含狀態與按鈕) --- */
+        .footer-section {
             background: #fff;
-            border-top: 1px solid #ccc;
-            flex-shrink: 0; /* 禁止被壓縮，按鈕永遠在底部 */
+            border-top: 1px solid #ddd;
+            flex-shrink: 0; /* 禁止被壓縮 */
             display: flex;
-            justify-content: center;
-            align-items: center;
-            gap: 5px;
-            flex-wrap: wrap;
-        }
-        
-        /* 手機橫向時，按鈕縮小一點點以免擋路 */
-        @media (max-height: 500px) {
-            .header { padding: 4px; font-size: 12px; }
-            .controls { padding: 4px; }
-            .btn { padding: 4px 8px; font-size: 12px; }
-            input { width: 50px; font-size: 12px; }
-        }
-
-        /* --- 原本的樣式保持不變 --- */
-        .btn {
-            padding: 8px 12px;
-            cursor: pointer;
-            font-size: 14px;
-            background: #ecf0f1; border: 1px solid #bdc3c7; border-radius: 4px;
-        }
-        .btn-primary { background: #3498db; color: white; border-color: #2980b9; }
-        .btn-danger { background: #e74c3c; color: white; border-color: #c0392b; }
-        .btn:disabled { opacity: 0.5; }
-        
-        input[type="number"] { padding: 5px; width: 60px; text-align: center; }
-
-        /* 資料面板 (保持原本風格) */
-        #data-panel {
-            position: absolute;
-            top: 5px; right: 5px;
-            width: 200px;
-            background: rgba(255,255,255,0.9);
-            border: 1px solid #999;
-            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
-            display: none; /* 預設隱藏 */
             flex-direction: column;
-            max-height: 90%; /* 避免太長 */
-            font-size: 12px;
-            z-index: 999;
+            z-index: 20;
+            padding-bottom: env(safe-area-inset-bottom);
+        }
+
+        /* 狀態列 (選取數/總擴散數) */
+        .status-bar {
+            padding: 6px 12px;
+            font-size: 13px;
+            color: #555;
+            background: #f8f9fa;
+            border-bottom: 1px solid #eee;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .legend { display: flex; align-items: center; gap: 10px; font-size: 12px; }
+        .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; margin-right: 4px; }
+
+        /* 按鈕區 */
+        .controls {
+            padding: 10px;
+            display: flex;
+            gap: 10px;
+            justify-content: space-between;
+        }
+
+        .btn {
+            flex: 1; /* 按鈕平均分配寬度 */
+            padding: 12px;
+            border: none; border-radius: 6px;
+            font-size: 16px; font-weight: bold;
+            color: white; cursor: pointer;
+            transition: opacity 0.2s;
+        }
+        .btn:active { opacity: 0.8; }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        /* 按鈕顏色 (依照你的截圖) */
+        .btn-grey { background-color: #7f8c8d; }   /* 重置 */
+        .btn-blue { background-color: #34495e; }   /* 數據表 */
+        .btn-green { background-color: #27ae60; }  /* 開始擴散 */
+        .btn-small { padding: 4px 10px; font-size: 13px; background: #3498db; color: white; border:none; border-radius:3px; cursor:pointer;}
+
+        /* --- 浮動面板 (數據表) --- */
+        #data-panel {
+            position: absolute; top: 10px; right: 10px;
+            width: 220px; max-height: 80%;
+            background: rgba(255,255,255,0.95);
+            border: 1px solid #ccc; border-radius: 8px;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.2);
+            display: none; flex-direction: column;
+            z-index: 100;
         }
         #data-panel.visible { display: flex; }
-        .panel-scroll { overflow-y: auto; flex: 1; }
+        .panel-header { padding: 8px; background: #eee; font-weight: bold; border-bottom: 1px solid #ddd; display: flex; justify-content: space-between;}
+        .panel-content { overflow-y: auto; flex: 1; font-size: 13px; }
         table { width: 100%; border-collapse: collapse; }
-        td, th { padding: 4px; border-bottom: 1px solid #eee; text-align: center; }
-        th { background: #eee; }
-        .row-seed { background: #fadbd8; }
+        th, td { padding: 6px; text-align: center; border-bottom: 1px solid #eee; }
+        .row-seed { background-color: #fadbd8; }
+        .row-active { background-color: #d5f5e3; }
+
+        /* --- 手機橫向模式優化 (Landscape) --- */
+        @media (max-height: 500px) {
+            .header { padding: 4px 10px; }
+            .title { font-size: 1rem; }
+            .status-bar { padding: 2px 10px; font-size: 11px; }
+            .controls { padding: 5px; }
+            .btn { padding: 6px; font-size: 14px; }
+            /* 橫向時數據面板縮小 */
+            #data-panel { width: 180px; max-height: 70%; font-size: 11px; }
+        }
         
         #toast {
             position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
             background: rgba(0,0,0,0.7); color: white; padding: 10px 20px;
-            border-radius: 5px; opacity: 0; pointer-events: none; transition: opacity 0.3s;
+            border-radius: 20px; pointer-events: none; opacity: 0; transition: opacity 0.3s; z-index: 999;
         }
     </style>
 </head>
 <body>
 
     <div class="header">
-        <div>Seeds: <span id="ui-seeds" style="font-weight:bold;color:#e74c3c">0</span>/3</div>
-        <button class="btn" onclick="toggleTable()">Data</button>
+        <div class="title">流量密碼戰 <span style="font-size:0.8em; font-weight:normal; opacity:0.8">尋找關鍵 (學生版)</span></div>
+        <div class="header-controls">
+            <input type="number" id="seedInput" value="2026">
+            <button class="btn-small" onclick="reloadMap()">載入</button>
+        </div>
     </div>
 
     <div id="canvas-wrapper">
         <canvas id="gameCanvas"></canvas>
-        <div id="toast">Message</div>
+        <div id="toast">提示訊息</div>
         
         <div id="data-panel">
-            <div style="padding:5px; background:#ddd; cursor:move" id="panel-header">Data View</div>
-            <div class="panel-scroll">
-                <tbody id="data-body"></tbody> <table id="data-table">
-                    <thead><tr><th>ID</th><th>Thr</th><th>In</th></tr></thead>
-                    <tbody id="data-body-real"></tbody>
+            <div class="panel-header">
+                <span>節點數據</span>
+                <button onclick="toggleTable()" style="border:none;background:none;">✕</button>
+            </div>
+            <div class="panel-content">
+                <table id="data-table">
+                    <thead><tr><th>ID</th><th>門檻</th><th>接收</th></tr></thead>
+                    <tbody id="data-body"></tbody>
                 </table>
             </div>
         </div>
     </div>
 
-    <div class="controls">
-        <input type="number" id="seedInput" value="2026">
-        <button class="btn btn-primary" onclick="reloadMap()">New</button>
-        <button class="btn btn-danger" onclick="resetGame()">Reset</button>
-        <button id="btn-start" class="btn btn-primary" onclick="startSim()" disabled>Start</button>
+    <div class="footer-section">
+        <div class="status-bar">
+            <div class="legend">
+                <span class="dot" style="background:#e74c3c"></span>種子
+                <span class="dot" style="background:#ff7675"></span>擴散
+            </div>
+            <div>
+                選取: <span id="ui-seeds" style="color:#e74c3c; font-weight:bold;">0</span>/3
+                &nbsp;&nbsp;|&nbsp;&nbsp;
+                總擴散數: <span id="ui-active">0</span>/16
+            </div>
+        </div>
+        <div class="controls">
+            <button class="btn btn-grey" onclick="resetGame()">重置</button>
+            <button class="btn btn-blue" onclick="toggleTable()">數據表</button>
+            <button id="btn-start" class="btn btn-green" onclick="startSim()" disabled>開始擴散</button>
+        </div>
     </div>
 
     <script>
-        // --- 核心邏輯 (保持不變，只加入手機 RWD 縮放) ---
-        
+        // --- 核心邏輯 (與原本保持一致) ---
         const NODE_COUNT = 16; 
-        const NODE_RADIUS = 28; // 維持較大半徑好按
+        const NODE_RADIUS = 28; 
         const MAX_SEEDS = 3;
 
         let canvas, ctx;
@@ -152,9 +193,11 @@
         let seeds = new Set();
         let isSimulating = false;
         let mySeed = 2026;
+        
+        // 觸控變數
         let dragNode = null;
+        let touchStartTime = 0;
 
-        // 隨機函數
         function seededRandom() {
             mySeed = (mySeed * 9301 + 49297) % 233280;
             return mySeed / 233280;
@@ -164,12 +207,12 @@
             canvas = document.getElementById('gameCanvas');
             ctx = canvas.getContext('2d');
             
-            // 監聽視窗大小變化 (包含手機旋轉)
+            // 監聽容器大小改變 (RWD 關鍵)
             const wrapper = document.getElementById('canvas-wrapper');
             const observer = new ResizeObserver(() => resizeCanvas());
             observer.observe(wrapper);
 
-            // 觸控與滑鼠事件
+            // 綁定事件
             canvas.addEventListener('mousedown', onPointerDown);
             canvas.addEventListener('touchstart', onPointerDown, {passive: false});
             window.addEventListener('mouseup', onPointerUp);
@@ -179,20 +222,18 @@
             setTimeout(() => { reloadMap(); loop(); }, 100);
         };
 
-        // 這是讓橫向模式正常的關鍵：根據 Wrapper 大小重設 Canvas
         function resizeCanvas() {
             const wrapper = document.getElementById('canvas-wrapper');
             const rect = wrapper.getBoundingClientRect();
-            // 使用 dpr 讓手機畫面清晰
             const dpr = window.devicePixelRatio || 1;
+            
             canvas.width = rect.width * dpr;
             canvas.height = rect.height * dpr;
             ctx.scale(dpr, dpr);
+            
             width = rect.width;
             height = rect.height;
         }
-
-        // --- 以下邏輯完全維持你原本的習慣 ---
 
         function reloadMap() {
             let val = document.getElementById('seedInput').value;
@@ -200,79 +241,81 @@
             resetGameData();
             nodes = [];
             
-            // 邊界保護，避免球生成在太邊緣
             let pad = NODE_RADIUS * 1.5;
-            let safeW = width - 2*pad;
-            let safeH = height - 2*pad;
-
+            let safeW = width - 2 * pad;
+            let safeH = height - 2 * pad;
             let attempts = 0;
+
             while(nodes.length < NODE_COUNT && attempts < 2000) {
                 attempts++;
                 let x = pad + seededRandom() * safeW;
                 let y = pad + seededRandom() * safeH;
                 let overlap = false;
                 for(let n of nodes) {
-                    if(Math.hypot(n.x-x, n.y-y) < NODE_RADIUS * 2.5) overlap = true;
+                    if(Math.hypot(n.x - x, n.y - y) < NODE_RADIUS * 2.5) overlap = true;
                 }
                 if(!overlap) {
                     nodes.push({
-                        id: nodes.length+1, x, y,
-                        power: Math.floor(seededRandom()*9)+1,
-                        threshold: Math.floor(seededRandom()*4)+2,
+                        id: nodes.length + 1, x, y,
+                        power: Math.floor(seededRandom() * 9) + 1, 
+                        threshold: Math.floor(seededRandom() * 4) + 2, 
                         currentInput: 0, state: 'normal', neighbors: []
                     });
                 }
             }
-            // 連線邏輯 (Simplified for brevity but same logic)
+
+            // 建立連結
             let connected = [0], unconnected = [];
             for(let i=1; i<NODE_COUNT; i++) unconnected.push(i);
             let pairs = [];
             
             while(unconnected.length > 0) {
-                let u = connected[Math.floor(seededRandom()*connected.length)];
+                let u = connected[Math.floor(seededRandom() * connected.length)];
                 let bestV = -1, minDist = Infinity, bestIdx = -1;
                 for(let k=0; k<5; k++) {
-                    let idx = Math.floor(seededRandom()*unconnected.length);
-                    let v = unconnected[idx];
-                    let d = Math.hypot(nodes[u].x-nodes[v].x, nodes[u].y-nodes[v].y);
-                    if(d < minDist) { minDist = d; bestV = v; bestIdx = idx; }
+                     let idx = Math.floor(seededRandom() * unconnected.length);
+                     let v = unconnected[idx];
+                     let d = Math.hypot(nodes[u].x - nodes[v].x, nodes[u].y - nodes[v].y);
+                     if(d < minDist) { minDist = d; bestV = v; bestIdx = idx; }
                 }
                 if(bestV === -1) { bestV = unconnected[0]; bestIdx = 0; }
-                pairs.push({u:u, v:bestV});
+                pairs.push({u: u, v: bestV});
                 connected.push(bestV); unconnected.splice(bestIdx, 1);
             }
-            // 隨機加線
+
             for(let i=0; i<NODE_COUNT; i++) {
-                let u = i, v = Math.floor(seededRandom()*NODE_COUNT);
-                if(u!==v && !pairs.some(p=>(p.u===u && p.v===v)||(p.u===v && p.v===u))) {
-                    if(Math.hypot(nodes[u].x-nodes[v].x, nodes[u].y-nodes[v].y) < width*0.45) pairs.push({u:u, v:v});
+                let u = i, v = Math.floor(seededRandom() * NODE_COUNT);
+                if(u !== v && !pairs.some(p => (p.u===u && p.v===v) || (p.u===v && p.v===u))) {
+                     if(Math.hypot(nodes[u].x - nodes[v].x, nodes[u].y - nodes[v].y) < width * 0.45) {
+                         pairs.push({u: u, v: v});
+                     }
                 }
             }
-            
-            // 建圖
-            let adj = Array.from({length:NODE_COUNT}, ()=>[]);
-            pairs.forEach(p=>{ adj[p.u].push(p.v); adj[p.v].push(p.u); });
-            
+
+            let adj = Array.from({length: NODE_COUNT}, () => []);
+            pairs.forEach(p => { adj[p.u].push(p.v); adj[p.v].push(p.u); });
+
             for(let i=0; i<NODE_COUNT; i++) {
                 let deg = adj[i].length;
-                if(deg===0) continue;
-                let wList = [], sum=0;
-                for(let k=0; k<deg; k++) { let r=Math.floor(seededRandom()*10)+1; wList.push(r); sum+=r; }
+                if(deg === 0) continue;
+                let wList = [], sum = 0;
+                for(let k=0; k<deg; k++) { let r = Math.floor(seededRandom() * 10) + 1; wList.push(r); sum += r; }
                 for(let k=0; k<deg; k++) {
-                    nodes[i].neighbors.push({ target: nodes[adj[i][k]], weight: wList[k]/sum, active:false });
+                    nodes[i].neighbors.push({ target: nodes[adj[i][k]], weight: wList[k] / sum, active: false });
                 }
             }
             updateTable();
-            showToast("Map Loaded");
+            showToast(`地圖 ${val} 已載入`);
         }
 
         function resetGameData() {
             isSimulating = false;
             seeds.clear();
-            nodes.forEach(n => { n.state='normal'; n.currentInput=0; n.neighbors.forEach(e=>e.active=false); });
+            nodes.forEach(n => { n.state = 'normal'; n.currentInput = 0; n.neighbors.forEach(e => e.active = false); });
             updateUI(); updateTable();
         }
 
+        // --- 互動與觸控修正 ---
         function onPointerDown(e) {
             if(isSimulating) return;
             if(e.target !== canvas) return;
@@ -281,68 +324,102 @@
             let rect = canvas.getBoundingClientRect();
             let clientX = e.clientX || e.touches[0].clientX;
             let clientY = e.clientY || e.touches[0].clientY;
-            let x = clientX - rect.left; 
+            let x = clientX - rect.left;
             let y = clientY - rect.top;
 
             for(let n of nodes) {
-                // 距離判定寬鬆一點方便手機點
-                if(Math.hypot(x - n.x, y - n.y) < NODE_RADIUS * 1.5) {
+                // 放寬判定範圍，讓手機好點
+                if(Math.hypot(x - n.x, y - n.y) < NODE_RADIUS * 1.8) {
+                    touchStartTime = Date.now();
                     toggleSeed(n);
                     return;
                 }
             }
         }
-        
-        // 為了簡單起見，這裡只保留點擊功能，不做拖曳，確保最穩定
-        function onPointerUp(e) { 
+
+        function onPointerUp(e) {
             if(e.type === 'touchend') e.preventDefault();
         }
 
         function toggleSeed(n) {
             if(seeds.has(n)) {
-                seeds.delete(n); n.state='normal'; n.currentInput=0;
+                seeds.delete(n); n.state = 'normal'; n.currentInput = 0;
             } else {
-                if(seeds.size >= MAX_SEEDS) { showToast("Max 3 Seeds"); return; }
-                seeds.add(n); n.state='seed'; n.currentInput = n.threshold + 99;
+                if(seeds.size >= MAX_SEEDS) { showToast("已達 3 個上限"); return; }
+                seeds.add(n); n.state = 'seed'; n.currentInput = n.threshold + 99;
             }
             updateUI(); updateTable();
         }
 
         function updateUI() {
             document.getElementById('ui-seeds').innerText = seeds.size;
-            document.getElementById('btn-start').disabled = (seeds.size===0);
+            let activeCount = nodes.filter(n => n.state === 'seed' || n.state === 'active').length;
+            document.getElementById('ui-active').innerText = activeCount;
+            document.getElementById('btn-start').disabled = (seeds.size === 0);
+        }
+
+        function toggleTable() {
+            const panel = document.getElementById('data-panel');
+            panel.classList.toggle('visible');
+            updateTable();
+        }
+
+        function updateTable() {
+            const tbody = document.getElementById('data-body');
+            if(!document.getElementById('data-panel').classList.contains('visible')) return;
+            
+            let html = '';
+            [...nodes].sort((a,b) => a.id - b.id).forEach(n => {
+                let cls = '';
+                if(n.state === 'seed') cls = 'row-seed';
+                else if(n.state === 'active') cls = 'row-active';
+                
+                html += `<tr class="${cls}">
+                    <td><b>${n.id}</b></td>
+                    <td>${n.threshold}</td>
+                    <td>${n.currentInput.toFixed(1)}</td>
+                </tr>`;
+            });
+            tbody.innerHTML = html;
         }
 
         function loop() {
             ctx.clearRect(0,0, canvas.width, canvas.height);
-            ctx.fillStyle = '#fff'; ctx.fillRect(0,0,canvas.width,canvas.height); // 白底
+            // 繪製背景網格(選用，增加質感)
+            ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, width, height);
             
-            // 畫線
-            nodes.forEach(s => {
-                s.neighbors.forEach(e => {
-                    drawCurve(s, e.target, e.active, e.weight);
+            nodes.forEach(source => {
+                source.neighbors.forEach(edge => {
+                    drawCurve(source, edge.target, edge.active, edge.weight);
                 });
             });
-            
-            // 畫球
+
             nodes.forEach(n => {
-                ctx.beginPath(); ctx.arc(n.x, n.y, NODE_RADIUS, 0, Math.PI*2);
-                if(n.state === 'seed') { ctx.fillStyle='#e74c3c'; ctx.strokeStyle='#c0392b'; }
-                else if(n.state === 'active') { ctx.fillStyle='#ff7675'; ctx.strokeStyle='#d63031'; }
-                else if(n.currentInput > 0) { ctx.fillStyle='#ffeaa7'; ctx.strokeStyle='#fdcb6e'; }
-                else { ctx.fillStyle='#ecf0f1'; ctx.strokeStyle='#bdc3c7'; }
+                ctx.beginPath();
+                ctx.arc(n.x, n.y, NODE_RADIUS, 0, Math.PI*2);
+                ctx.shadowColor = 'rgba(0,0,0,0.1)'; ctx.shadowBlur = 6;
                 
-                ctx.fill(); ctx.lineWidth=2; ctx.stroke();
+                if(n.state === 'seed') {
+                    ctx.fillStyle = '#e74c3c'; ctx.strokeStyle = '#c0392b';
+                } else if(n.state === 'active') {
+                    ctx.fillStyle = '#ff7675'; ctx.strokeStyle = '#d63031';
+                } else if(n.currentInput > 0) {
+                    ctx.fillStyle = '#ffeaa7'; ctx.strokeStyle = '#fdcb6e';
+                } else {
+                    ctx.fillStyle = '#ecf0f1'; ctx.strokeStyle = '#bdc3c7';
+                }
                 
-                ctx.fillStyle='#2d3436'; ctx.font='bold 16px Arial'; 
-                ctx.textAlign='center'; ctx.textBaseline='middle';
+                ctx.fill(); ctx.shadowBlur = 0; ctx.lineWidth = 2; ctx.stroke();
+
+                ctx.fillStyle = '#2d3436'; ctx.font = 'bold 16px Arial'; 
+                ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
                 ctx.fillText(n.id, n.x, n.y);
-                
-                ctx.fillStyle='#555'; ctx.font='bold 11px Arial';
-                ctx.fillText(`${n.power} | ${n.threshold}`, n.x, n.y + NODE_RADIUS + 12);
-                
+
+                ctx.fillStyle = '#555'; ctx.font = 'bold 11px Arial';
+                ctx.fillText(`${n.power} | ${n.threshold}`, n.x, n.y + NODE_RADIUS + 14);
+
                 if(n.state !== 'seed' && n.currentInput > 0) {
-                    ctx.fillStyle='#0984e3'; ctx.font='bold 14px Arial';
+                    ctx.fillStyle = '#0984e3'; ctx.font = 'bold 14px Arial';
                     ctx.fillText(`R:${n.currentInput.toFixed(1)}`, n.x, n.y - NODE_RADIUS - 12);
                 }
             });
@@ -350,76 +427,82 @@
         }
 
         function drawCurve(s, t, active, w) {
-            let dx = t.x - s.x, dy = t.y - s.y, dist = Math.sqrt(dx*dx+dy*dy);
-            if(dist<1) return;
-            let mx = (s.x+t.x)/2, my = (s.y+t.y)/2;
-            let cx = mx - dy/dist * 30, cy = my + dx/dist * 30;
+            let dx = t.x - s.x, dy = t.y - s.y, dist = Math.sqrt(dx*dx + dy*dy);
+            if(dist < 1) return;
+            
+            let midX = (s.x + t.x) / 2, midY = (s.y + t.y) / 2;
+            let offset = 30;
+            let cx = midX - dy/dist * offset;
+            let cy = midY + dx/dist * offset;
 
             ctx.beginPath(); ctx.moveTo(s.x, s.y); ctx.quadraticCurveTo(cx, cy, t.x, t.y);
-            ctx.strokeStyle = active ? '#f1c40f' : '#ccc';
-            ctx.lineWidth = active ? 4 : 1.5;
+            
+            if(active) { ctx.strokeStyle = '#f1c40f'; ctx.lineWidth = 4; }
+            else { ctx.strokeStyle = '#ccc'; ctx.lineWidth = 1.5; }
             ctx.stroke();
 
-            // 標籤
-            let tt = 0.4, itt = 1-tt;
+            // 權重標籤
+            let tt = 0.4, itt = 1 - tt;
             let lx = itt*itt*s.x + 2*itt*tt*cx + tt*tt*t.x;
             let ly = itt*itt*s.y + 2*itt*tt*cy + tt*tt*t.y;
-            ctx.fillStyle = 'rgba(255,255,255,0.8)'; ctx.fillRect(lx-10, ly-8, 20, 16);
-            ctx.fillStyle = '#666'; ctx.font='10px Arial'; ctx.fillText(Math.round(w*100)+'%', lx, ly);
+            
+            ctx.fillStyle = 'rgba(255,255,255,0.8)';
+            let txt = Math.round(w*100) + "%";
+            let tw = ctx.measureText(txt).width;
+            ctx.fillRect(lx - tw/2 - 2, ly - 8, tw + 4, 16);
+            
+            ctx.fillStyle = '#666'; ctx.font = '10px Arial';
+            ctx.fillText(txt, lx, ly);
         }
 
         async function startSim() {
             isSimulating = true;
-            document.querySelectorAll('.btn').forEach(b=>b.disabled=true);
-            showToast("Running...");
-            
-            let q = [...seeds];
-            let visitedEdge = new Set();
-            
-            while(q.length > 0) {
-                await new Promise(r=>setTimeout(r, 800));
-                let nextQ = [];
-                for(let s of q) {
-                    for(let edge of s.neighbors) {
-                        let key = `${s.id}-${edge.target.id}`;
-                        if(visitedEdge.has(key)) continue;
-                        if(edge.target.state === 'seed') { visitedEdge.add(key); continue; }
-                        
-                        visitedEdge.add(key); edge.active = true;
-                        edge.target.currentInput += s.power * edge.weight;
+            document.querySelectorAll('.btn').forEach(b => b.disabled = true);
+            showToast("擴散中...");
+
+            let queue = [...seeds];
+            let visitedEdges = new Set();
+
+            while(queue.length > 0) {
+                await new Promise(r => setTimeout(r, 800));
+                let nextQueue = [];
+
+                for(let source of queue) {
+                    for(let edge of source.neighbors) {
+                        let key = `${source.id}-${edge.target.id}`;
+                        if(visitedEdges.has(key)) continue;
+                        let target = edge.target;
+                        if(target.state === 'seed') { visitedEdges.add(key); continue; }
+
+                        visitedEdges.add(key);
+                        edge.active = true;
+                        target.currentInput += source.power * edge.weight;
                     }
                 }
+                
                 nodes.forEach(n => {
-                    if(n.state==='normal' && n.currentInput > n.threshold) {
-                        n.state='active'; nextQ.push(n);
+                    if(n.state === 'normal' && n.currentInput > n.threshold) {
+                        n.state = 'active'; nextQueue.push(n);
                     }
                 });
-                q = nextQ; updateUI(); updateTable();
+                queue = nextQueue;
+                updateUI(); updateTable();
             }
-            showToast("Done");
-            document.querySelectorAll('.btn').forEach(b=>b.disabled=false);
-            document.getElementById('btn-start').disabled=true;
+            showToast("擴散結束");
+            document.querySelectorAll('.btn').forEach(b => b.disabled = false);
+            document.getElementById('btn-start').disabled = true;
         }
 
-        function resetGame() { resetGameData(); document.getElementById('btn-start').disabled=true; }
-        
-        function updateTable() {
-            const body = document.getElementById('data-body-real');
-            if(!document.getElementById('data-panel').classList.contains('visible')) return;
-            let h = '';
-            [...nodes].sort((a,b)=>a.id-b.id).forEach(n=>{
-                let cls = n.state==='seed'?'row-seed':'';
-                h+=`<tr class="${cls}"><td>${n.id}</td><td>${n.threshold}</td><td>${n.currentInput.toFixed(1)}</td></tr>`;
-            });
-            body.innerHTML = h;
+        function resetGame() {
+            resetGameData();
+            document.querySelectorAll('.btn').forEach(b => b.disabled = false);
+            document.getElementById('btn-start').disabled = true;
         }
-        function toggleTable() {
-            document.getElementById('data-panel').classList.toggle('visible');
-            updateTable();
-        }
-        function showToast(m) {
-            let t=document.getElementById('toast'); t.innerText=m; t.style.opacity=1;
-            setTimeout(()=>t.style.opacity=0, 2000);
+
+        function showToast(msg) {
+            let t = document.getElementById('toast');
+            t.innerText = msg; t.style.opacity = 1;
+            setTimeout(() => t.style.opacity = 0, 2000);
         }
     </script>
 </body>
