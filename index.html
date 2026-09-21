@@ -151,11 +151,12 @@
 <header>
     <div class="title">
         <h1>流量密碼戰</h1>
-        <small>尋找關鍵 (學生版)</small>
+        <small>尋找關鍵 (學生版) · 地圖 1~999</small>
     </div>
     <div class="seed-ctrl">
-        <input type="number" id="seedInput" value="2026">
+        <input type="number" id="seedInput" value="1" min="1" max="999" step="1">
         <button onclick="reloadMap()">載入</button>
+        <button onclick="randomMap()" title="隨機抽一張地圖">🎲</button>
     </div>
 </header>
 
@@ -202,6 +203,7 @@ const NODE_COUNT = 16;
 const NODE_RADIUS = 28;
 const MAX_SEEDS = 3;
 const LCG_M = 233280;
+const MAP_MIN = 1, MAP_MAX = 999;   // 地圖編號範圍：共 999 張
 
 // ★ 地圖生成一律使用「正規化座標」(0~1)，與螢幕像素完全無關。
 //   舊版用像素距離做重疊檢查與連線門檻，畫布尺寸不同 → 亂數序列錯位 → 不同裝置地圖不同。
@@ -214,7 +216,7 @@ let width = 0, height = 0;
 let nodes = [];
 let seeds = new Set();
 let isSimulating = false;
-let mySeed = 2026;
+let mySeed = 1;
 let mapHash = '';
 
 // ★ 關鍵修正變數：處理點擊 vs 拖曳
@@ -229,11 +231,18 @@ function seededRandom() {
     return mySeed / LCG_M;
 }
 
-// 種子輸入正規化：非數字→2026；負數/超大值→摺進 [0, LCG_M)
+// 地圖編號正規化：非數字→1；超出 1~999 則摺回範圍內 (0→999、1000→1、-1→998)
 function normalizeSeed(v) {
     let n = parseInt(v, 10);
-    if (!Number.isFinite(n)) n = 2026;
-    return ((n % LCG_M) + LCG_M) % LCG_M;
+    if (!Number.isFinite(n)) n = MAP_MIN;
+    const span = MAP_MAX - MAP_MIN + 1;
+    return (((n - MAP_MIN) % span) + span) % span + MAP_MIN;
+}
+
+// 隨機抽一張地圖 (只決定「抽哪一號」，該號地圖本身仍是固定的)
+function randomMap() {
+    document.getElementById('seedInput').value = MAP_MIN + Math.floor(Math.random() * (MAP_MAX - MAP_MIN + 1));
+    reloadMap();
 }
 
 // 平方距離：只用乘加，避免 Math.hypot / Math.sqrt 在不同引擎的最後一位差異
@@ -244,7 +253,9 @@ function dist2(ax, ay, bx, by) {
 
 // ====== 地圖生成 (純函式：輸入種子 → 輸出節點；不讀取任何畫布尺寸) ======
 function generateMap(seedValue) {
-    mySeed = seedValue;
+    // 地圖編號先經過一次打散再當亂數種子，讓 1 號與 2 號地圖不會長得很像
+    mySeed = (seedValue * 7919 + 104729) % LCG_M;
+    for (let i = 0; i < 8; i++) seededRandom();
     const list = [];
 
     // 1. 拒絕取樣放節點 (正規化座標)
