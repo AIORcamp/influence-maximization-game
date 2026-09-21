@@ -34,7 +34,7 @@
             padding: 4px; border-radius: 4px;
         }
         .seed-ctrl input {
-            width: 50px; border: none; border-radius: 2px; 
+            width: 60px; border: none; border-radius: 2px;
             text-align: center; padding: 4px; font-weight: bold; font-size: 1rem;
         }
         .seed-ctrl button {
@@ -45,7 +45,7 @@
 
         /* --- 3. 中間畫布 --- */
         #canvas-wrapper {
-            flex: 1; min-height: 0; position: relative; 
+            flex: 1; min-height: 0; position: relative;
             background: #fff; width: 100%; overflow: hidden;
             touch-action: none; /* 禁止預設觸控 */
         }
@@ -78,7 +78,7 @@
         }
         #panel-content { overflow-y: auto; padding: 0; flex: 1; }
         #data-panel.minimized #panel-content { display: none; }
-        
+
         table.data-table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
         table.data-table th { background: #ecf0f1; text-align: center; padding: 5px; position: sticky; top: 0; }
         table.data-table td { border-bottom: 1px solid #eee; text-align: center; padding: 5px 0; }
@@ -100,11 +100,13 @@
         .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
 
         .status-bar {
-            display: flex; justify-content: space-between;
+            display: flex; justify-content: space-between; align-items: center;
             background: #f1f2f6; padding: 6px 10px; border-radius: 5px;
             font-size: 0.9rem; color: #555; font-weight: bold;
         }
         .status-bar b { color: #e74c3c; font-size: 1.1rem; }
+        /* 校驗碼：全班比對地圖是否相同用 */
+        .status-bar .hash { color: #2c3e50; font-size: 0.9rem; font-family: Consolas, "Courier New", monospace; letter-spacing: 1px; }
 
         .btn-group { display: flex; gap: 8px; height: 44px; }
         .btn {
@@ -114,7 +116,7 @@
         }
         .btn:active { opacity: 0.8; }
         .btn:disabled { opacity: 0.5; cursor: not-allowed; filter: grayscale(1); }
-        
+
         /* 移除 AI 按鈕，調整比例 */
         .btn-reset { background: #95a5a6; flex: 0.6; }
         .btn-toggle { background: #34495e; flex: 0.6; }
@@ -132,13 +134,13 @@
             header { height: 40px; padding: 0 8px; }
             .title h1 { font-size: 1rem; }
             .title small { display: none; }
-            
+
             .footer { padding: 4px 8px; gap: 4px; }
             .legend { display: none; }
             .status-bar { padding: 2px 8px; font-size: 0.8rem; height: 24px; }
             .btn-group { height: 34px; }
             .btn { font-size: 0.85rem; }
-            
+
             #data-panel { max-height: 80%; width: 140px; font-size: 0.9em; }
             #panel-header { padding: 4px 8px; }
         }
@@ -159,7 +161,7 @@
 
 <div id="canvas-wrapper">
     <canvas id="gameCanvas"></canvas>
-    
+
     <div id="data-panel">
         <div id="panel-header">
             <span>節點數據</span>
@@ -184,6 +186,7 @@
     </div>
     <div class="status-bar">
         <span>種子: <b id="ui-seeds">0</b>/3</span>
+        <span title="全班校驗碼相同，代表地圖完全一樣">校驗碼 <span class="hash" id="map-hash">------</span></span>
         <span>已啟動: <b id="ui-active">0</b>/16</span>
     </div>
     <div class="btn-group">
@@ -195,45 +198,193 @@
 
 <script>
 // --- 參數 ---
-const NODE_COUNT = 16; 
-const NODE_RADIUS = 28; 
+const NODE_COUNT = 16;
+const NODE_RADIUS = 28;
 const MAX_SEEDS = 3;
+const LCG_M = 233280;
+
+// ★ 地圖生成一律使用「正規化座標」(0~1)，與螢幕像素完全無關。
+//   舊版用像素距離做重疊檢查與連線門檻，畫布尺寸不同 → 亂數序列錯位 → 不同裝置地圖不同。
+const MIN_DIST_N = 0.20;        // 節點最小間距 (正規化)
+const EXTRA_EDGE_MAX_N = 0.45;  // 額外連線的最遠距離 (正規化)
 
 // --- 變數 ---
 let canvas, ctx;
-let width, height;
-let nodes = []; 
+let width = 0, height = 0;
+let nodes = [];
 let seeds = new Set();
 let isSimulating = false;
 let mySeed = 2026;
+let mapHash = '';
 
 // ★ 關鍵修正變數：處理點擊 vs 拖曳
 let dragNode = null;
 let dragStartPos = {x:0, y:0};
-let isDraggingNode = false; 
+let isDraggingNode = false;
 let touchStartTime = 0; // 記錄按下時間
 
-// --- 隨機數 ---
+// --- 隨機數 (LCG，只用整數加乘與取餘，任何 JS 引擎結果都一致) ---
 function seededRandom() {
-    mySeed = (mySeed * 9301 + 49297) % 233280;
-    return mySeed / 233280;
+    mySeed = (mySeed * 9301 + 49297) % LCG_M;
+    return mySeed / LCG_M;
+}
+
+// 種子輸入正規化：非數字→2026；負數/超大值→摺進 [0, LCG_M)
+function normalizeSeed(v) {
+    let n = parseInt(v, 10);
+    if (!Number.isFinite(n)) n = 2026;
+    return ((n % LCG_M) + LCG_M) % LCG_M;
+}
+
+// 平方距離：只用乘加，避免 Math.hypot / Math.sqrt 在不同引擎的最後一位差異
+function dist2(ax, ay, bx, by) {
+    const dx = ax - bx, dy = ay - by;
+    return dx * dx + dy * dy;
+}
+
+// ====== 地圖生成 (純函式：輸入種子 → 輸出節點；不讀取任何畫布尺寸) ======
+function generateMap(seedValue) {
+    mySeed = seedValue;
+    const list = [];
+
+    // 1. 拒絕取樣放節點 (正規化座標)
+    let minD2 = MIN_DIST_N * MIN_DIST_N;
+    let attempts = 0;
+    while (list.length < NODE_COUNT) {
+        attempts++;
+        if (attempts > 2000) { attempts = 0; minD2 *= 0.81; } // 極少數放不下時縮小間距，仍只取決於亂數序列
+        const nx = seededRandom();
+        const ny = seededRandom();
+        let overlap = false;
+        for (const n of list) {
+            if (dist2(n.nx, n.ny, nx, ny) < minD2) { overlap = true; break; }
+        }
+        if (!overlap) {
+            list.push({
+                id: list.length + 1,
+                nx: nx, ny: ny,     // 正規化座標 (不變的真相來源)
+                x: 0, y: 0,         // 螢幕座標 (由 layoutNodes 依畫布尺寸算出)
+                power: Math.floor(seededRandom() * 9) + 1,
+                threshold: Math.floor(seededRandom() * 4) + 2,
+                currentInput: 0, state: 'normal', neighbors: []
+            });
+        }
+    }
+
+    // 2. 隨機生成樹 (保證連通)
+    const connected = [0], unconnected = [];
+    for (let i = 1; i < NODE_COUNT; i++) unconnected.push(i);
+    const rawPairs = [];
+
+    while (unconnected.length > 0) {
+        const u = connected[Math.floor(seededRandom() * connected.length)];
+        let bestV = -1, minD = Infinity, bestIdx = -1;
+        for (let k = 0; k < 5; k++) {
+            const idx = Math.floor(seededRandom() * unconnected.length);
+            const v = unconnected[idx];
+            const d = dist2(list[u].nx, list[u].ny, list[v].nx, list[v].ny);
+            if (d < minD) { minD = d; bestV = v; bestIdx = idx; }
+        }
+        if (bestV === -1) { bestV = unconnected[0]; bestIdx = 0; }
+        rawPairs.push({u: u, v: bestV});
+        connected.push(bestV); unconnected.splice(bestIdx, 1);
+    }
+
+    // 3. 額外連線 (距離門檻改用正規化距離，不再依賴畫布寬度)
+    const maxD2 = EXTRA_EDGE_MAX_N * EXTRA_EDGE_MAX_N;
+    for (let i = 0; i < NODE_COUNT; i++) {
+        const u = i, v = Math.floor(seededRandom() * NODE_COUNT);
+        if (u !== v && !rawPairs.some(p => (p.u === u && p.v === v) || (p.u === v && p.v === u))) {
+            if (dist2(list[u].nx, list[u].ny, list[v].nx, list[v].ny) < maxD2) {
+                rawPairs.push({u: u, v: v});
+            }
+        }
+    }
+    const adj = Array.from({length: NODE_COUNT}, () => []);
+    rawPairs.forEach(p => { adj[p.u].push(p.v); adj[p.v].push(p.u); });
+
+    // 4. 出邊權重 (每個節點的出邊權重總和 = 1)
+    for (let i = 0; i < NODE_COUNT; i++) {
+        const degree = adj[i].length;
+        if (degree === 0) continue;
+        const wList = []; let sum = 0;
+        for (let k = 0; k < degree; k++) { const r = Math.floor(seededRandom() * 10) + 1; wList.push(r); sum += r; }
+        for (let k = 0; k < degree; k++) {
+            list[i].neighbors.push({ target: list[adj[i][k]], weight: wList[k] / sum, active: false });
+        }
+    }
+    return list;
+}
+
+// 校驗碼：把節點位置/能力/門檻/所有連線與權重壓成 6 碼十六進位。
+// 全班校驗碼相同 = 地圖完全相同，可直接口頭核對。
+function computeMapHash(list) {
+    let s = '';
+    for (const n of list) {
+        s += n.id + ':' + Math.round(n.nx * 1e6) + ':' + Math.round(n.ny * 1e6) + ':' + n.power + ':' + n.threshold + ';';
+        for (const e of n.neighbors) s += e.target.id + ':' + Math.round(e.weight * 1e6) + ',';
+        s += '|';
+    }
+    let h = 2166136261;
+    for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+    return (h >>> 0).toString(16).toUpperCase().padStart(8, '0').slice(-6);
+}
+
+// 正規化座標 → 螢幕座標 (每次畫布尺寸改變都重算，地圖本身不變)
+function layoutNodesFor(list, w, h) {
+    const pad = NODE_RADIUS * 1.5;
+    const sw = Math.max(1, w - 2 * pad), sh = Math.max(1, h - 2 * pad);
+    for (const n of list) { n.x = pad + n.nx * sw; n.y = pad + n.ny * sh; }
+
+    // 螢幕過窄/過扁時，把太近的節點互相推開。
+    // 只改顯示用的 x,y，不碰 nx,ny 與連線資料，因此校驗碼與遊戲結果完全不受影響。
+    const minD = NODE_RADIUS * 2.3;
+    const lo = NODE_RADIUS, hiX = Math.max(lo, w - NODE_RADIUS), hiY = Math.max(lo, h - NODE_RADIUS);
+    for (let it = 0; it < 80; it++) {
+        let moved = false;
+        for (let i = 0; i < list.length; i++) {
+            for (let j = i + 1; j < list.length; j++) {
+                const a = list[i], b = list[j];
+                let dx = b.x - a.x, dy = b.y - a.y, d = Math.sqrt(dx * dx + dy * dy);
+                if (d >= minD) continue;
+                if (d < 0.01) { dx = 1; dy = 0.5; d = Math.sqrt(1.25); }
+                const push = (minD - d) / 2 / d;
+                a.x -= dx * push; a.y -= dy * push;
+                b.x += dx * push; b.y += dy * push;
+                moved = true;
+            }
+        }
+        for (const n of list) {
+            n.x = Math.max(lo, Math.min(hiX, n.x));
+            n.y = Math.max(lo, Math.min(hiY, n.y));
+        }
+        if (!moved) break;
+    }
+}
+function layoutNodes() { layoutNodesFor(nodes, width, height); }
+// 拖曳後把螢幕座標寫回正規化座標，旋轉/縮放視窗時位置才會跟著保留
+function syncNormalized(n) {
+    const pad = NODE_RADIUS * 1.5;
+    const w = Math.max(1, width - 2 * pad), h = Math.max(1, height - 2 * pad);
+    n.nx = Math.max(0, Math.min(1, (n.x - pad) / w));
+    n.ny = Math.max(0, Math.min(1, (n.y - pad) / h));
 }
 
 window.onload = function() {
     canvas = document.getElementById('gameCanvas');
     ctx = canvas.getContext('2d');
-    
+
     const wrapper = document.getElementById('canvas-wrapper');
     const resizeObserver = new ResizeObserver(() => resizeCanvas());
     resizeObserver.observe(wrapper);
-    
+
     // 事件監聽 (統一處理觸控與滑鼠)
     canvas.addEventListener('mousedown', onPointerDown);
     canvas.addEventListener('touchstart', onPointerDown, {passive: false});
-    
+
     canvas.addEventListener('mousemove', onPointerMove);
     canvas.addEventListener('touchmove', onPointerMove, {passive: false});
-    
+
     window.addEventListener('mouseup', onPointerUp);
     window.addEventListener('touchend', onPointerUp, {passive: false});
 
@@ -250,22 +401,23 @@ function resizeCanvas() {
     const wrapper = document.getElementById('canvas-wrapper');
     const rect = wrapper.getBoundingClientRect();
     const dpr = window.devicePixelRatio || 1;
-    
+
     canvas.width = rect.width * dpr;
     canvas.height = rect.height * dpr;
     canvas.style.width = '100%';
     canvas.style.height = '100%';
-    
+
     ctx.scale(dpr, dpr);
     width = rect.width;
     height = rect.height;
+    layoutNodes();
 }
 
 function getPointerPos(e) {
     let rect = canvas.getBoundingClientRect();
     let clientX = e.clientX;
     let clientY = e.clientY;
-    
+
     if(e.touches && e.touches.length > 0) {
         clientX = e.touches[0].clientX;
         clientY = e.touches[0].clientY;
@@ -276,7 +428,7 @@ function getPointerPos(e) {
     return { x: clientX - rect.left, y: clientY - rect.top };
 }
 
-// --- ★ 觸控互動邏輯 (核心修正) ---
+// --- ★ 觸控互動邏輯 ---
 function onPointerDown(e) {
     if(isSimulating) return;
     if(e.target !== canvas) return;
@@ -297,8 +449,8 @@ function onPointerDown(e) {
 
 function onPointerMove(e) {
     if(!dragNode) return;
-    if(e.type === 'touchmove') e.preventDefault(); 
-    
+    if(e.type === 'touchmove') e.preventDefault();
+
     let pos = getPointerPos(e);
     if(!isDraggingNode) {
         let dist = Math.hypot(pos.x - dragStartPos.x, pos.y - dragStartPos.y);
@@ -309,6 +461,7 @@ function onPointerMove(e) {
         let p = NODE_RADIUS;
         dragNode.x = Math.max(p, Math.min(width - p, pos.x));
         dragNode.y = Math.max(p, Math.min(height - p, pos.y));
+        syncNormalized(dragNode);
     }
 }
 
@@ -321,7 +474,7 @@ function onPointerUp(e) {
         if(!isDraggingNode || timeDiff < 200) {
             toggleSeed(dragNode);
         }
-        dragNode = null; 
+        dragNode = null;
         isDraggingNode = false;
     }
 }
@@ -338,7 +491,7 @@ function toggleTable() {
 }
 
 function toggleMinimize(e) {
-    e.stopPropagation(); 
+    e.stopPropagation();
     const panel = document.getElementById('data-panel');
     const btn = e.target;
     if(panel.classList.contains('minimized')) {
@@ -393,73 +546,17 @@ function initDraggablePanel() {
 
 // --- 遊戲邏輯 ---
 function reloadMap() {
-    let inputVal = document.getElementById('seedInput').value;
-    mySeed = parseInt(inputVal) || 2026;
+    const input = document.getElementById('seedInput');
+    const seedValue = normalizeSeed(input.value);
+    input.value = seedValue;
+
+    nodes = generateMap(seedValue);   // 只跟種子有關，與螢幕/瀏覽器/作業系統無關
+    layoutNodes();                    // 再依目前畫布尺寸投影到螢幕
+    mapHash = computeMapHash(nodes);
+    document.getElementById('map-hash').innerText = mapHash;
+
     resetGameData();
-    nodes = [];
-    
-    let pad = NODE_RADIUS * 1.5;
-    let safeW = width - 2 * pad;
-    let safeH = height - 2 * pad;
-    let attempts = 0;
-
-    while(nodes.length < NODE_COUNT && attempts < 2000) {
-        attempts++;
-        let x = pad + seededRandom() * safeW;
-        let y = pad + seededRandom() * safeH;
-        let overlap = false;
-        for(let n of nodes) {
-            if(Math.hypot(n.x - x, n.y - y) < NODE_RADIUS * 2.5) { overlap = true; break; }
-        }
-        if(!overlap) {
-            nodes.push({
-                id: nodes.length + 1, x: x, y: y,
-                power: Math.floor(seededRandom() * 9) + 1, 
-                threshold: Math.floor(seededRandom() * 4) + 2, 
-                currentInput: 0, state: 'normal', neighbors: []
-            });
-        }
-    }
-
-    let connected = [0], unconnected = []; 
-    for(let i=1; i<NODE_COUNT; i++) unconnected.push(i);
-    let rawPairs = [];
-
-    while(unconnected.length > 0) {
-        let u = connected[Math.floor(seededRandom() * connected.length)];
-        let bestV = -1, minDist = Infinity, bestIdx = -1;
-        for(let k=0; k<5; k++) {
-             let idx = Math.floor(seededRandom() * unconnected.length);
-             let v = unconnected[idx];
-             let d = Math.hypot(nodes[u].x - nodes[v].x, nodes[u].y - nodes[v].y);
-             if(d < minDist) { minDist = d; bestV = v; bestIdx = idx; }
-        }
-        if(bestV === -1) { bestV = unconnected[0]; bestIdx = 0; }
-        rawPairs.push({u: u, v: bestV});
-        connected.push(bestV); unconnected.splice(bestIdx, 1);
-    }
-    for(let i=0; i<NODE_COUNT; i++) {
-        let u = i, v = Math.floor(seededRandom() * NODE_COUNT);
-        if(u !== v && !rawPairs.some(p => (p.u===u && p.v===v) || (p.u===v && p.v===u))) {
-             if(Math.hypot(nodes[u].x - nodes[v].x, nodes[u].y - nodes[v].y) < width * 0.45) {
-                 rawPairs.push({u: u, v: v});
-             }
-        }
-    }
-    let adj = Array.from({length: NODE_COUNT}, () => []);
-    rawPairs.forEach(p => { adj[p.u].push(p.v); adj[p.v].push(p.u); });
-
-    for(let i=0; i<NODE_COUNT; i++) {
-        let degree = adj[i].length;
-        if(degree === 0) continue;
-        let wList = [], sum = 0;
-        for(let k=0; k<degree; k++) { let r = Math.floor(seededRandom() * 10) + 1; wList.push(r); sum += r; }
-        for(let k=0; k<degree; k++) {
-            nodes[i].neighbors.push({ target: nodes[adj[i][k]], weight: wList[k] / sum, active: false });
-        }
-    }
-    updateTable();
-    showToast(`地圖 ${inputVal} 已載入`);
+    showToast(`地圖 ${seedValue} 已載入 · 校驗碼 ${mapHash}`);
 }
 
 function resetGameData() {
@@ -488,19 +585,19 @@ function loop() {
     ctx.clearRect(0,0, canvas.width, canvas.height);
     // 繪製背景線
     ctx.fillStyle = '#fff'; ctx.fillRect(0,0, width, height);
-    
+
     nodes.forEach(s => s.neighbors.forEach(e => drawCurve(s, e.target, e.active, e.weight, false)));
     nodes.forEach(n => {
         ctx.beginPath(); ctx.arc(n.x, n.y, NODE_RADIUS, 0, Math.PI*2);
         ctx.shadowColor = 'rgba(0,0,0,0.1)'; ctx.shadowBlur = 4;
-        
+
         if(n.state === 'seed') { ctx.fillStyle = '#e74c3c'; ctx.strokeStyle = '#c0392b'; }
         else if(n.state === 'active') { ctx.fillStyle = '#ff7675'; ctx.strokeStyle = '#d63031'; }
         else if(n.currentInput > 0) { ctx.fillStyle = '#ffeaa7'; ctx.strokeStyle = '#fdcb6e'; }
         else { ctx.fillStyle = '#ecf0f1'; ctx.strokeStyle = '#bdc3c7'; }
-        
+
         ctx.fill(); ctx.shadowBlur = 0; ctx.lineWidth = 2; ctx.stroke();
-        ctx.fillStyle = '#2d3436'; ctx.font = 'bold 16px Arial'; 
+        ctx.fillStyle = '#2d3436'; ctx.font = 'bold 16px Arial';
         ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
         ctx.fillText(n.id, n.x, n.y);
         ctx.fillStyle = '#555'; ctx.font = 'bold 11px Arial';
@@ -518,12 +615,12 @@ function drawCurve(s, t, active, w, drawLabel) {
     let dx = t.x - s.x, dy = t.y - s.y, dist = Math.sqrt(dx*dx + dy*dy);
     if(dist < 1) return;
     let midX = (s.x + t.x) / 2, midY = (s.y + t.y) / 2;
-    let offset = 30; 
+    let offset = 30;
     let cx = midX - dy/dist * offset; let cy = midY + dx/dist * offset;
 
     if(!drawLabel) {
         ctx.beginPath(); ctx.moveTo(s.x, s.y); ctx.quadraticCurveTo(cx, cy, t.x, t.y);
-        if(active) { ctx.strokeStyle = '#f1c40f'; ctx.lineWidth = 4; } 
+        if(active) { ctx.strokeStyle = '#f1c40f'; ctx.lineWidth = 4; }
         else { ctx.strokeStyle = '#ccc'; ctx.lineWidth = 1.5; }
         ctx.stroke();
         let t_ = 0.85, it_ = 1-t_;
@@ -539,10 +636,11 @@ function drawCurve(s, t, active, w, drawLabel) {
         let lx = it_*it_*s.x + 2*it_*t_*cx + t_*t_*t.x;
         let ly = it_*it_*s.y + 2*it_*t_*cy + t_*t_*t.y;
         let txt = Math.round(w * 100) + "%";
-        ctx.fillStyle = 'rgba(255,255,255,0.85)';
+        ctx.font = '10px Arial'; // 先設字型再量寬度，底框才剛好
         let tw = ctx.measureText(txt).width + 4;
+        ctx.fillStyle = 'rgba(255,255,255,0.85)';
         ctx.fillRect(lx - tw/2, ly - 8, tw, 16);
-        ctx.fillStyle = '#555'; ctx.font = '10px Arial';
+        ctx.fillStyle = '#555';
         ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
         ctx.fillText(txt, lx, ly);
     }
@@ -553,7 +651,7 @@ function toggleSeed(n) {
         seeds.delete(n); n.state = 'normal'; n.currentInput = 0;
     } else {
         if(seeds.size >= MAX_SEEDS) { showToast("已達 3 個上限"); return; }
-        seeds.add(n); n.state = 'seed'; n.currentInput = n.threshold + 99; 
+        seeds.add(n); n.state = 'seed'; n.currentInput = n.threshold + 99;
     }
     updateUI(); updateTable();
 }
@@ -597,12 +695,12 @@ async function startSim() {
             }
         });
         queue = nextQueue;
-        updateUI(); updateTable(); 
+        updateUI(); updateTable();
     }
-    showToast("擴散結束");
+    const total = nodes.filter(n => n.state === 'seed' || n.state === 'active').length;
+    showToast(`擴散結束：啟動 ${total}/${NODE_COUNT}`);
     document.querySelector('.btn-reset').disabled = false;
     document.querySelector('.btn-toggle').disabled = false;
-    // Removed AI button reference
 }
 
 function resetGame() {
